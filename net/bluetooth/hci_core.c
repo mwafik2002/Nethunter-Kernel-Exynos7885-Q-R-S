@@ -3109,12 +3109,14 @@ void hci_conn_params_clear_disabled(struct hci_dev *hdev)
 }
 
 /* This function requires the caller holds hdev->lock */
-static void hci_conn_params_clear_all(struct hci_dev *hdev)
+void hci_conn_params_clear_all(struct hci_dev *hdev)
 {
 	struct hci_conn_params *params, *tmp;
 
 	list_for_each_entry_safe(params, tmp, &hdev->le_conn_params, list)
 		hci_conn_params_free(params);
+
+	hci_update_background_scan(hdev);
 
 	BT_DBG("All LE connection parameters were removed");
 }
