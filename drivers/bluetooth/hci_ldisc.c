@@ -162,7 +162,7 @@ restart:
 			break;
 		}
 
-		hci_uart_tx_complete(hu, hci_skb_pkt_type(skb));
+		hci_uart_tx_complete(hu, bt_cb(skb)->pkt_type);
 		kfree_skb(skb);
 	}
 
@@ -248,8 +248,7 @@ static int hci_uart_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct hci_uart *hu = hci_get_drvdata(hdev);
 
-	BT_DBG("%s: type %d len %d", hdev->name, hci_skb_pkt_type(skb),
-	       skb->len);
+	BT_DBG("%s: type %d len %d", hdev->name, bt_cb(skb)->pkt_type, skb->len);
 
 	hu->proto->enqueue(hu, skb);
 
