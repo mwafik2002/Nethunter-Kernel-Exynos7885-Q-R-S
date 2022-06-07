@@ -166,13 +166,8 @@ struct htt_data_tx_desc {
 	__le16 len;
 	__le16 id;
 	__le32 frags_paddr;
-	union {
-		__le32 peerid;
-		struct {
-			__le16 peerid;
-			__le16 freq;
-		} __packed offchan_tx;
-	} __packed;
+	__le16 peerid;
+	__le16 freq;
 	u8 prefetch[0]; /* start of frame, for FW classification engine */
 } __packed;
 
