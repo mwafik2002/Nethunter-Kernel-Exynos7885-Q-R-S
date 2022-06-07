@@ -19,8 +19,6 @@
 #include <linux/debugfs.h>
 #include <linux/vmalloc.h>
 #include <linux/utsname.h>
-#include <linux/crc32.h>
-#include <linux/firmware.h>
 
 #include "core.h"
 #include "debug.h"
@@ -143,11 +141,10 @@ void ath10k_debug_print_hwfw_info(struct ath10k *ar)
 		    config_enabled(CONFIG_ATH10K_DFS_CERTIFIED),
 		    config_enabled(CONFIG_NL80211_TESTMODE));
 
-	ath10k_info(ar, "firmware ver %s api %d features %s crc32 %08x\n",
+	ath10k_info(ar, "firmware ver %s api %d features %s\n",
 		    ar->hw->wiphy->fw_version,
 		    ar->fw_api,
-		    fw_features,
-		    crc32_le(0, ar->firmware->data, ar->firmware->size));
+		    fw_features);
 }
 
 void ath10k_debug_print_board_info(struct ath10k *ar)
@@ -160,10 +157,9 @@ void ath10k_debug_print_board_info(struct ath10k *ar)
 	else
 		scnprintf(boardinfo, sizeof(boardinfo), "N/A");
 
-	ath10k_info(ar, "board_file api %d bmi_id %s crc32 %08x",
+	ath10k_info(ar, "board_file api %d bmi_id %s",
 		    ar->bd_api,
-		    boardinfo,
-		    crc32_le(0, ar->board->data, ar->board->size));
+		    boardinfo);
 }
 
 void ath10k_debug_print_boot_info(struct ath10k *ar)
