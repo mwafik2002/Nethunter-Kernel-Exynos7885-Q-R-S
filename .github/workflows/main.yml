@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ runner.temp }}/toolchain-cache
+            ${{ env.temp }}/toolchain-cache
             ${{ env.CCACHE_DIR }}
           key: toolchain-${{ hashFiles('**/.github/**/build-kernel.yml') }}-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles(github.workspace + '/**') }}
           restore-keys: |
@@ -66,8 +66,8 @@ jobs:
 
       - name: Download and extract Linaro toolchain
         run: |
-          mkdir -p "${{ runner.temp }}/toolchain-cache"
-          cd "${{ runner.temp }}/toolchain-cache"
+          mkdir -p "${{ env.temp }}/toolchain-cache"
+          cd "${{ env.temp }}/toolchain-cache"
           if [ ! -d "${TOOLCHAIN_NAME}" ]; then
             echo "Downloading toolchain: ${TOOLCHAIN_URL}"
             curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
@@ -76,7 +76,7 @@ jobs:
             echo "Toolchain already extracted"
           fi
           echo "TOOLCHAIN_PATH=${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_ENV
-          echo "${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
+          echo "${{ env.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=${CROSS_COMPILE_PREFIX}" >> $GITHUB_ENV
           echo "ARCH=${ARCH}" >> $GITHUB_ENV
 
