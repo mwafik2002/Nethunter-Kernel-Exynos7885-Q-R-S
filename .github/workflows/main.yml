@@ -26,20 +26,25 @@ env:
   TOOLCHAIN_NAME: gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu
   TOOLCHAIN_URL: https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
   CROSS_COMPILE_PREFIX: aarch64-linux-gnu-
-  CCACHE_DIR: ${{ env.temp }}/ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  TEMP_DIR: ${{ github.workspace }}/.temp
+
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - name: Cache toolchain and ccache
+        uses: actions/cache@v4
         with:
-          fetch-depth: 0
-          ref: ${{ github.event.inputs.branch || github.ref_name || 'main' }}
-
+          path: |
+            ${{ env.TEMP_DIR }}/toolchain-cache
+            ${{ env.CCACHE_DIR }}
+          key: toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles('**/*') }}
+          restore-keys: |
+            toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
+            toolchain-
+            
       - name: Install base packages
         run: |
           sudo apt-get update
@@ -66,19 +71,16 @@ jobs:
 
       - name: Download and extract Linaro toolchain
         run: |
-          mkdir -p "${{ env.temp }}/toolchain-cache"
-          cd "${{ env.temp }}/toolchain-cache"
+          mkdir -p "${{ env.TEMP_DIR }}/toolchain-cache"
+          cd "${{ env.TEMP_DIR }}/toolchain-cache"
           if [ ! -d "${TOOLCHAIN_NAME}" ]; then
-            echo "Downloading toolchain: ${TOOLCHAIN_URL}"
             curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
             tar -xf "${TOOLCHAIN_NAME}.tar.xz"
-          else
-            echo "Toolchain already extracted"
           fi
-          echo "TOOLCHAIN_PATH=${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_ENV
-          echo "${{ env.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
+          echo "${{ env.TEMP_DIR }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=${CROSS_COMPILE_PREFIX}" >> $GITHUB_ENV
           echo "ARCH=${ARCH}" >> $GITHUB_ENV
+
 
       - name: Show toolchain version (sanity)
         run: |
