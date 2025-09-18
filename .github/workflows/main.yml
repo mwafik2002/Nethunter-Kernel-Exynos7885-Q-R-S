@@ -154,8 +154,8 @@ jobs:
           cp -v "${OUTPUT_DIR}/config" "${ZIPROOT}/" 2>/dev/null || true
           mkdir -p "${ZIPROOT}/META-INF/com/google/android"
           cat > "${ZIPROOT}/META-INF/com/google/android/updater-script" <<'EOF'
-print("Flashable kernel package - adapt as needed for your device");
-EOF
+          print("Flashable kernel package - adapt as needed for your device");
+          EOF
           ZIP_NAME=kernel-${{ github.run_number }}-${{ github.sha }}.zip
           (cd "${ZIPROOT}" && zip -r "../${ZIP_NAME}" .)
           mv "${ZIP_NAME}" "${OUTPUT_DIR}/"
