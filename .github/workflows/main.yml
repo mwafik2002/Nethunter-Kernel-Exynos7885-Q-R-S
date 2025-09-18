@@ -1,149 +1,194 @@
-  - name: Checkout source
-    uses: actions/checkout@v4
-    with:
-      # user will paste this workflow into their fork, so default repository is the current one
-      fetch-depth: 0
-      ref: ${{ github.event.inputs.branch || github.ref_name || 'main' }}
+name: Android Kernel CI - A30s (Exynos7885) - Nethunter
 
-  - name: Install base packages
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev curl zip unzip rsync python3-distutils ccache
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: false
+        default: 'main'
+  schedule:
+    - cron: '0 3 * * 1' # weekly Monday 03:00 UTC
 
-  - name: Configure ccache
-    run: |
-      mkdir -p "${CCACHE_DIR}"
-      ccache --max-size=5G
-      echo "CCACHE_DIR=${CCACHE_DIR}" >> $GITHUB_ENV
-      echo "CCACHE_MAX_SIZE=5G" >> $GITHUB_ENV
-      # Add ccache to PATH, prefer ccache wrapped compilers
-      echo "/usr/lib/ccache" >> $GITHUB_PATH
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
 
-  - name: Cache toolchain and ccache
-    uses: actions/cache@v4
-    with:
-      path: |
-        ${{ runner.temp }}/toolchain-cache
-        ${{ env.CCACHE_DIR }}
-      # key changes when toolchain URL changes so we re-download
-      key: toolchain-${{ hashFiles('**/.github/**/build-kernel.yml') }}-{{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles(github.workspace + '/**') }}
-      restore-keys: |
-        toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
-        toolchain-
+env:
+  ARCH: arm64
+  DEFCONFIG: a30s_defconfig
+  KERNEL_VERSION: 4.4.177
+  OUTPUT_DIR: out
+  TOOLCHAIN_NAME: gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu
+  TOOLCHAIN_URL: https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
+  CROSS_COMPILE_PREFIX: aarch64-linux-gnu-
+  CCACHE_DIR: ${{ runner.temp }}/ccache
 
-  - name: Download and extract Linaro toolchain
-    id: toolchain
-    run: |
-      mkdir -p "${{ runner.temp }}/toolchain-cache"
-      cd "${{ runner.temp }}/toolchain-cache"
-      if [ ! -d "${TOOLCHAIN_NAME}" ]; then
-        echo "Downloading toolchain: ${TOOLCHAIN_URL}"
-        curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
-        tar -xf "${TOOLCHAIN_NAME}.tar.xz"
-      else
-        echo "Toolchain already extracted"
-      fi
-      echo "TOOLCHAIN_PATH=${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_ENV
-      # add toolchain bin to PATH
-      echo "${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
-      # export CROSS_COMPILE prefix
-      echo "CROSS_COMPILE=${{ env.CROSS_COMPILE_PREFIX }}" >> $GITHUB_ENV
-      echo "ARCH=${{ env.ARCH }}" >> $GITHUB_ENV
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
 
-  - name: Show toolchain version (sanity)
-    run: |
-      echo "Using toolchain in $PATH:"
-      which ${CROSS_COMPILE_PREFIX}gcc || true
-      ${CROSS_COMPILE_PREFIX}gcc --version || true
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.ref_name || 'main' }}
 
-  - name: Prepare kernel build dir
-    run: |
-      # ensure clean output
-      rm -rf "${{ env.OUTPUT_DIR }}"
-      mkdir -p "${{ env.OUTPUT_DIR }}"
+      - name: Install base packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev curl zip unzip rsync python3-distutils ccache
 
-  - name: Kernel: clean and load defconfig
-    run: |
-      set -e
-      make ARCH=${ARCH} mrproper
-      make ARCH=${ARCH} ${DEFCONFIG}
-      # copy final config for packaging
-      cp -v .config "${{ env.OUTPUT_DIR }}/.config"
+      - name: Configure ccache
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --max-size=5G
+          echo "CCACHE_DIR=${CCACHE_DIR}" >> $GITHUB_ENV
+          echo "CCACHE_MAX_SIZE=5G" >> $GITHUB_ENV
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
 
-  - name: Kernel: build Image, dtbs and modules
-    run: |
-      set -e
-      export ARCH=${ARCH}
-      export CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
-      # use ccache wrapper if available
-      export CCACHE_DIR="${CCACHE_DIR}"
-      export PATH="/usr/lib/ccache:$PATH"
-      # build kernel and dtbs and modules
-      make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} Image
-      # build device tree blobs if available
-      if grep -q "DTB" arch/arm64/boot/Makefile 2>/dev/null || [ -d arch/arm64/boot/dts ]; then
-        make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs || true
-      fi
-      # build modules (some Android kernels don't build modules; ok to continue)
-      make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules || true
-      # install modules to a staging dir
-      make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} INSTALL_MOD_PATH="${PWD}/${{ env.OUTPUT_DIR }}/modules" modules_install || true
+      - name: Cache toolchain and ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/toolchain-cache
+            ${{ env.CCACHE_DIR }}
+          key: toolchain-${{ hashFiles('**/.github/**/build-kernel.yml') }}-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles(github.workspace + '/**') }}
+          restore-keys: |
+            toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
+            toolchain-
 
-  - name: Collect build artifacts
-    run: |
-      set -e
-      ls -la arch/arm64/boot || true
-      # main kernel Image
-      if [ -f arch/arm64/boot/Image ]; then
-        cp -v arch/arm64/boot/Image "${{ env.OUTPUT_DIR }}/Image"
-        # compressed image (commonly required)
-        gzip -9 -c arch/arm64/boot/Image > "${{ env.OUTPUT_DIR }}/Image.gz"
-      else
-        echo "ERROR: arch/arm64/boot/Image not found" && exit 1
-      fi
-      # System map
-      if [ -f System.map ]; then
-        cp -v System.map "${{ env.OUTPUT_DIR }}/System.map"
-      fi
-      # dtbs (if any)
-      if [ -d arch/arm64/boot/dts ]; then
-        mkdir -p "${{ env.OUTPUT_DIR }}/dtb"
-        find arch/arm64/boot/dts -name '*.dtb' -exec cp -v --parents {} "${{ env.OUTPUT_DIR }}/dtb" \; || true
-        # also copy top-level dtbs
-        find arch/arm64/boot -maxdepth 1 -name '*.dtb' -exec cp -v {} "${{ env.OUTPUT_DIR }}/dtb" \; || true
-      fi
-      # modules
-      if [ -d "${{ env.OUTPUT_DIR }}/modules" ]; then
-        tar -C "${{ env.OUTPUT_DIR }}/modules" -czf "${{ env.OUTPUT_DIR }}/modules.tar.gz" . || true
-      fi
-      # copy config
-      if [ -f .config ]; then
-        cp -v .config "${{ env.OUTPUT_DIR }}/config"
-      fi
-      # list output
-      ls -la "${{ env.OUTPUT_DIR }}"
+      - name: Download and extract Linaro toolchain
+        run: |
+          mkdir -p "${{ runner.temp }}/toolchain-cache"
+          cd "${{ runner.temp }}/toolchain-cache"
+          if [ ! -d "${TOOLCHAIN_NAME}" ]; then
+            echo "Downloading toolchain: ${TOOLCHAIN_URL}"
+            curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
+            tar -xf "${TOOLCHAIN_NAME}.tar.xz"
+          else
+            echo "Toolchain already extracted"
+          fi
+          echo "TOOLCHAIN_PATH=${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_ENV
+          echo "${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
+          echo "CROSS_COMPILE=${CROSS_COMPILE_PREFIX}" >> $GITHUB_ENV
+          echo "ARCH=${ARCH}" >> $GITHUB_ENV
 
-  - name: Create flashable zip (basic)
-    run: |
-      set -e
-      ZIPROOT=${PWD}/kernel-flash
-      rm -rf "${ZIPROOT}"
-      mkdir -p "${ZIPROOT}/boot" "${ZIPROOT}/modules" "${ZIPROOT}/dtb"
-      # place Image.gz in boot (preferred by many recoveries)
-      cp -v "${{ env.OUTPUT_DIR }}/Image.gz" "${ZIPROOT}/boot/Image.gz"
-      # copy Image as well
-      cp -v "${{ env.OUTPUT_DIR }}/Image" "${ZIPROOT}/boot/Image"
-      # dtbs
-      if [ -d "${{ env.OUTPUT_DIR }}/dtb" ]; then
-        rsync -a "${{ env.OUTPUT_DIR }}/dtb/" "${ZIPROOT}/dtb/"
-      fi
-      # modules
-      if [ -f "${{ env.OUTPUT_DIR }}/modules.tar.gz" ]; then
-        cp -v "${{ env.OUTPUT_DIR }}/modules.tar.gz" "${ZIPROOT}/modules/modules.tar.gz"
-      fi
-      # System.map and config for debugging
-      cp -v "${{ env.OUTPUT_DIR }}/System.map" "${ZIPROOT}/" 2>/dev/null || true
-      cp -v "${{ env.OUTPUT_DIR }}/config" "${ZIPROOT}/" 2>/dev/null || true
-      # basic updater-script placeholder (device-specific flashing steps required). This zip is a container; you may need to adapt the flashing script for your ROM.
-      mkdir -p "${ZIPROOT}/META-INF/com/google/android"
-      cat > "${ZIPROOT}/META-INF/com/google/android/updater-script" <<'UPD'
+      - name: Show toolchain version (sanity)
+        run: |
+          which ${CROSS_COMPILE_PREFIX}gcc || true
+          ${CROSS_COMPILE_PREFIX}gcc --version || true
+
+      - name: Prepare kernel build dir
+        run: |
+          rm -rf "${OUTPUT_DIR}"
+          mkdir -p "${OUTPUT_DIR}"
+
+      - name: Kernel: clean and load defconfig
+        run: |
+          make ARCH=${ARCH} mrproper
+          make ARCH=${ARCH} ${DEFCONFIG}
+          cp -v .config "${OUTPUT_DIR}/.config"
+
+      - name: Kernel: build Image, dtbs and modules
+        run: |
+          export ARCH=${ARCH}
+          export CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
+          export CCACHE_DIR="${CCACHE_DIR}"
+          export PATH="/usr/lib/ccache:$PATH"
+          make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} Image
+          if grep -q "DTB" arch/arm64/boot/Makefile 2>/dev/null || [ -d arch/arm64/boot/dts ]; then
+            make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs || true
+          fi
+          make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules || true
+          make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} INSTALL_MOD_PATH="${PWD}/${OUTPUT_DIR}/modules" modules_install || true
+
+      - name: Collect build artifacts
+        run: |
+          ls -la arch/arm64/boot || true
+          if [ -f arch/arm64/boot/Image ]; then
+            cp -v arch/arm64/boot/Image "${OUTPUT_DIR}/Image"
+            gzip -9 -c arch/arm64/boot/Image > "${OUTPUT_DIR}/Image.gz"
+          else
+            echo "ERROR: arch/arm64/boot/Image not found"
+            exit 1
+          fi
+          if [ -f System.map ]; then
+            cp -v System.map "${OUTPUT_DIR}/System.map"
+          fi
+          if [ -d arch/arm64/boot/dts ]; then
+            mkdir -p "${OUTPUT_DIR}/dtb"
+            find arch/arm64/boot/dts -name '*.dtb' -exec cp -v --parents {} "${OUTPUT_DIR}/dtb" \; || true
+            find arch/arm64/boot -maxdepth 1 -name '*.dtb' -exec cp -v {} "${OUTPUT_DIR}/dtb" \; || true
+          fi
+          if [ -d "${OUTPUT_DIR}/modules" ]; then
+            tar -C "${OUTPUT_DIR}/modules" -czf "${OUTPUT_DIR}/modules.tar.gz" . || true
+          fi
+          if [ -f .config ]; then
+            cp -v .config "${OUTPUT_DIR}/config"
+          fi
+          ls -la "${OUTPUT_DIR}"
+
+      - name: Create flashable zip (basic)
+        run: |
+          ZIPROOT=${PWD}/kernel-flash
+          rm -rf "${ZIPROOT}"
+          mkdir -p "${ZIPROOT}/boot" "${ZIPROOT}/modules" "${ZIPROOT}/dtb"
+          cp -v "${OUTPUT_DIR}/Image.gz" "${ZIPROOT}/boot/Image.gz"
+          cp -v "${OUTPUT_DIR}/Image" "${ZIPROOT}/boot/Image"
+          if [ -d "${OUTPUT_DIR}/dtb" ]; then
+            rsync -a "${OUTPUT_DIR}/dtb/" "${ZIPROOT}/dtb/"
+          fi
+          if [ -f "${OUTPUT_DIR}/modules.tar.gz" ]; then
+            cp -v "${OUTPUT_DIR}/modules.tar.gz" "${ZIPROOT}/modules/modules.tar.gz"
+          fi
+          cp -v "${OUTPUT_DIR}/System.map" "${ZIPROOT}/" 2>/dev/null || true
+          cp -v "${OUTPUT_DIR}/config" "${ZIPROOT}/" 2>/dev/null || true
+          mkdir -p "${ZIPROOT}/META-INF/com/google/android"
+          cat > "${ZIPROOT}/META-INF/com/google/android/updater-script" <<'EOF'
+print("Flashable kernel package - adapt as needed for your device");
+EOF
+          ZIP_NAME=kernel-${{ github.run_number }}-${{ github.sha }}.zip
+          (cd "${ZIPROOT}" && zip -r "../${ZIP_NAME}" .)
+          mv "${ZIP_NAME}" "${OUTPUT_DIR}/"
+          ls -lh "${OUTPUT_DIR}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel-artifacts-${{ github.run_id }}
+          path: |
+            ${OUTPUT_DIR}
+            kernel-flash/**/*.zip
+
+      - name: Create GitHub release and attach artifacts
+        if: success()
+        uses: softprops/action-gh-release@v1
+        id: create_release
+        with:
+          tag_name: build-${{ github.run_number }}-${{ github.sha }}
+          name: Kernel build ${{ github.run_number }} - ${{ github.sha }}
+          body: |
+            Automated kernel build for A30s (Exynos7885).
+            Kernel version: ${{ env.KERNEL_VERSION }}
+            Defconfig: ${{ env.DEFCONFIG }}
+            Toolchain: ${{ env.TOOLCHAIN_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release assets
+        if: success()
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.OUTPUT_DIR }}/kernel-${{ github.run_number }}-${{ github.sha }}.zip
+          asset_name: kernel-${{ github.run_number }}-${{ github.sha }}.zip
+          asset_content_type: application/zip
