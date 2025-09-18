@@ -29,22 +29,18 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   TEMP_DIR: ${{ github.workspace }}/.temp
 
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+
     steps:
-      - name: Cache toolchain and ccache
-        uses: actions/cache@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
         with:
-          path: |
-            ${{ env.TEMP_DIR }}/toolchain-cache
-            ${{ env.CCACHE_DIR }}
-          key: toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles('**/*') }}
-          restore-keys: |
-            toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
-            toolchain-
-            
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.ref_name || 'main' }}
+
       - name: Install base packages
         run: |
           sudo apt-get update
@@ -62,9 +58,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.temp }}/toolchain-cache
+            ${{ env.TEMP_DIR }}/toolchain-cache
             ${{ env.CCACHE_DIR }}
-          key: toolchain-${{ hashFiles('**/.github/**/build-kernel.yml') }}-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles(github.workspace + '/**') }}
+          key: toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles('**/*') }}
           restore-keys: |
             toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
             toolchain-
@@ -74,13 +70,15 @@ jobs:
           mkdir -p "${{ env.TEMP_DIR }}/toolchain-cache"
           cd "${{ env.TEMP_DIR }}/toolchain-cache"
           if [ ! -d "${TOOLCHAIN_NAME}" ]; then
+            echo "Downloading toolchain: ${TOOLCHAIN_URL}"
             curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
             tar -xf "${TOOLCHAIN_NAME}.tar.xz"
+          else
+            echo "Toolchain already extracted"
           fi
           echo "${{ env.TEMP_DIR }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=${CROSS_COMPILE_PREFIX}" >> $GITHUB_ENV
           echo "ARCH=${ARCH}" >> $GITHUB_ENV
-
 
       - name: Show toolchain version (sanity)
         run: |
@@ -166,7 +164,7 @@ jobs:
         with:
           name: kernel-artifacts-${{ github.run_id }}
           path: |
-            ${OUTPUT_DIR}
+            ${{ env.OUTPUT_DIR }}
             kernel-flash/**/*.zip
 
       - name: Create GitHub release and attach artifacts
