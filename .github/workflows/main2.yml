@@ -93,12 +93,12 @@ jobs:
       - name: Kernel clean and load defconfig
         run: |
           make ARCH=${ARCH} mrproper
-          make ARCH=${ARCH} ${DEFCONFIG}
+          make ARCH=${ARCH} a30s_defconfig
           cp -v .config "${OUTPUT_DIR}/.config"
 
       - name: Kernel build Image, dtbs and modules
         run: |
-          export ARCH=${ARCH}
+          export ARCH=${ARCH)  
           export CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
           export CCACHE_DIR="${CCACHE_DIR}"
           export PATH="/usr/lib/ccache:$PATH"
