@@ -1,0 +1,149 @@
+  - name: Checkout source
+    uses: actions/checkout@v4
+    with:
+      # user will paste this workflow into their fork, so default repository is the current one
+      fetch-depth: 0
+      ref: ${{ github.event.inputs.branch || github.ref_name || 'main' }}
+
+  - name: Install base packages
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev curl zip unzip rsync python3-distutils ccache
+
+  - name: Configure ccache
+    run: |
+      mkdir -p "${CCACHE_DIR}"
+      ccache --max-size=5G
+      echo "CCACHE_DIR=${CCACHE_DIR}" >> $GITHUB_ENV
+      echo "CCACHE_MAX_SIZE=5G" >> $GITHUB_ENV
+      # Add ccache to PATH, prefer ccache wrapped compilers
+      echo "/usr/lib/ccache" >> $GITHUB_PATH
+
+  - name: Cache toolchain and ccache
+    uses: actions/cache@v4
+    with:
+      path: |
+        ${{ runner.temp }}/toolchain-cache
+        ${{ env.CCACHE_DIR }}
+      # key changes when toolchain URL changes so we re-download
+      key: toolchain-${{ hashFiles('**/.github/**/build-kernel.yml') }}-{{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-${{ hashFiles(github.workspace + '/**') }}
+      restore-keys: |
+        toolchain-${{ env.TOOLCHAIN_NAME }}-${{ runner.os }}-
+        toolchain-
+
+  - name: Download and extract Linaro toolchain
+    id: toolchain
+    run: |
+      mkdir -p "${{ runner.temp }}/toolchain-cache"
+      cd "${{ runner.temp }}/toolchain-cache"
+      if [ ! -d "${TOOLCHAIN_NAME}" ]; then
+        echo "Downloading toolchain: ${TOOLCHAIN_URL}"
+        curl -fsSL -o "${TOOLCHAIN_NAME}.tar.xz" "${TOOLCHAIN_URL}"
+        tar -xf "${TOOLCHAIN_NAME}.tar.xz"
+      else
+        echo "Toolchain already extracted"
+      fi
+      echo "TOOLCHAIN_PATH=${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_ENV
+      # add toolchain bin to PATH
+      echo "${{ runner.temp }}/toolchain-cache/${TOOLCHAIN_NAME}/bin" >> $GITHUB_PATH
+      # export CROSS_COMPILE prefix
+      echo "CROSS_COMPILE=${{ env.CROSS_COMPILE_PREFIX }}" >> $GITHUB_ENV
+      echo "ARCH=${{ env.ARCH }}" >> $GITHUB_ENV
+
+  - name: Show toolchain version (sanity)
+    run: |
+      echo "Using toolchain in $PATH:"
+      which ${CROSS_COMPILE_PREFIX}gcc || true
+      ${CROSS_COMPILE_PREFIX}gcc --version || true
+
+  - name: Prepare kernel build dir
+    run: |
+      # ensure clean output
+      rm -rf "${{ env.OUTPUT_DIR }}"
+      mkdir -p "${{ env.OUTPUT_DIR }}"
+
+  - name: Kernel: clean and load defconfig
+    run: |
+      set -e
+      make ARCH=${ARCH} mrproper
+      make ARCH=${ARCH} ${DEFCONFIG}
+      # copy final config for packaging
+      cp -v .config "${{ env.OUTPUT_DIR }}/.config"
+
+  - name: Kernel: build Image, dtbs and modules
+    run: |
+      set -e
+      export ARCH=${ARCH}
+      export CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
+      # use ccache wrapper if available
+      export CCACHE_DIR="${CCACHE_DIR}"
+      export PATH="/usr/lib/ccache:$PATH"
+      # build kernel and dtbs and modules
+      make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} Image
+      # build device tree blobs if available
+      if grep -q "DTB" arch/arm64/boot/Makefile 2>/dev/null || [ -d arch/arm64/boot/dts ]; then
+        make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs || true
+      fi
+      # build modules (some Android kernels don't build modules; ok to continue)
+      make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules || true
+      # install modules to a staging dir
+      make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} INSTALL_MOD_PATH="${PWD}/${{ env.OUTPUT_DIR }}/modules" modules_install || true
+
+  - name: Collect build artifacts
+    run: |
+      set -e
+      ls -la arch/arm64/boot || true
+      # main kernel Image
+      if [ -f arch/arm64/boot/Image ]; then
+        cp -v arch/arm64/boot/Image "${{ env.OUTPUT_DIR }}/Image"
+        # compressed image (commonly required)
+        gzip -9 -c arch/arm64/boot/Image > "${{ env.OUTPUT_DIR }}/Image.gz"
+      else
+        echo "ERROR: arch/arm64/boot/Image not found" && exit 1
+      fi
+      # System map
+      if [ -f System.map ]; then
+        cp -v System.map "${{ env.OUTPUT_DIR }}/System.map"
+      fi
+      # dtbs (if any)
+      if [ -d arch/arm64/boot/dts ]; then
+        mkdir -p "${{ env.OUTPUT_DIR }}/dtb"
+        find arch/arm64/boot/dts -name '*.dtb' -exec cp -v --parents {} "${{ env.OUTPUT_DIR }}/dtb" \; || true
+        # also copy top-level dtbs
+        find arch/arm64/boot -maxdepth 1 -name '*.dtb' -exec cp -v {} "${{ env.OUTPUT_DIR }}/dtb" \; || true
+      fi
+      # modules
+      if [ -d "${{ env.OUTPUT_DIR }}/modules" ]; then
+        tar -C "${{ env.OUTPUT_DIR }}/modules" -czf "${{ env.OUTPUT_DIR }}/modules.tar.gz" . || true
+      fi
+      # copy config
+      if [ -f .config ]; then
+        cp -v .config "${{ env.OUTPUT_DIR }}/config"
+      fi
+      # list output
+      ls -la "${{ env.OUTPUT_DIR }}"
+
+  - name: Create flashable zip (basic)
+    run: |
+      set -e
+      ZIPROOT=${PWD}/kernel-flash
+      rm -rf "${ZIPROOT}"
+      mkdir -p "${ZIPROOT}/boot" "${ZIPROOT}/modules" "${ZIPROOT}/dtb"
+      # place Image.gz in boot (preferred by many recoveries)
+      cp -v "${{ env.OUTPUT_DIR }}/Image.gz" "${ZIPROOT}/boot/Image.gz"
+      # copy Image as well
+      cp -v "${{ env.OUTPUT_DIR }}/Image" "${ZIPROOT}/boot/Image"
+      # dtbs
+      if [ -d "${{ env.OUTPUT_DIR }}/dtb" ]; then
+        rsync -a "${{ env.OUTPUT_DIR }}/dtb/" "${ZIPROOT}/dtb/"
+      fi
+      # modules
+      if [ -f "${{ env.OUTPUT_DIR }}/modules.tar.gz" ]; then
+        cp -v "${{ env.OUTPUT_DIR }}/modules.tar.gz" "${ZIPROOT}/modules/modules.tar.gz"
+      fi
+      # System.map and config for debugging
+      cp -v "${{ env.OUTPUT_DIR }}/System.map" "${ZIPROOT}/" 2>/dev/null || true
+      cp -v "${{ env.OUTPUT_DIR }}/config" "${ZIPROOT}/" 2>/dev/null || true
+      # basic updater-script placeholder (device-specific flashing steps required). This zip is a container; you may need to adapt the flashing script for your ROM.
+      mkdir -p "${ZIPROOT}/META-INF/com/google/android"
+      cat > "${ZIPROOT}/META-INF/com/google/android/updater-script" <<'UPD'
