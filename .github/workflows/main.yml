@@ -92,7 +92,7 @@ jobs:
           rm -rf "${OUTPUT_DIR}"
           mkdir -p "${OUTPUT_DIR}"
 
-      - name: Kernel: clean and load defconfig
+      - name: Kernel clean and load defconfig
         run: |
           make ARCH=${ARCH} mrproper
           make ARCH=${ARCH} ${DEFCONFIG}
