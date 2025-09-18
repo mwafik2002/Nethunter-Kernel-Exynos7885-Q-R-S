@@ -98,7 +98,7 @@ jobs:
 
       - name: Kernel build Image, dtbs and modules
         run: |
-          export ARCH=${ARCH)  
+          export ARCH=${ARCH}
           export CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
           export CCACHE_DIR="${CCACHE_DIR}"
           export PATH="/usr/lib/ccache:$PATH"
