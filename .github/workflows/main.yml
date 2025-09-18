@@ -26,7 +26,7 @@ env:
   TOOLCHAIN_NAME: gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu
   TOOLCHAIN_URL: https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
   CROSS_COMPILE_PREFIX: aarch64-linux-gnu-
-  CCACHE_DIR: ${{ runner.temp }}/ccache
+  CCACHE_DIR: ${{ env.temp }}/ccache
 
 jobs:
   build:
